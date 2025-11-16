@@ -188,8 +188,23 @@ class GaussianQueryModule(nn.Module):
         xx, yy = ax_batch_expanded_x, ax_batch_expanded_y
         xy = torch.stack([xx, yy], dim=-1)  # [num_LR_points, k, k, 2]
 
-        # 5.3 计算高斯值
-        z = torch.einsum('b...i,bij,b...j->b...', xy, -0.5 * inv_covariance, xy)
+        # 5.3 计算高斯值（马氏距离）
+        # xy: [num_LR_points, k, k, 2]
+        # inv_covariance: [num_LR_points, 2, 2]
+        # 需要计算: z = -0.5 * xy @ inv_covariance @ xy^T
+
+        # 重塑 xy 为 [num_LR_points, k*k, 2]
+        xy_flat = xy.reshape(num_LR_points, -1, 2)
+
+        # 计算 xy @ inv_covariance: [num_LR_points, k*k, 2]
+        temp = torch.matmul(xy_flat, -0.5 * inv_covariance)
+
+        # 计算内积: [num_LR_points, k*k]
+        z_flat = (temp * xy_flat).sum(dim=-1)
+
+        # 重塑回 [num_LR_points, k, k]
+        z = z_flat.reshape(num_LR_points, self.kernel_size, self.kernel_size)
+
         kernel = torch.exp(z) / (
             2 * torch.tensor(np.pi, device=device) *
             torch.sqrt(torch.det(covariance)).to(device).view(num_LR_points, 1, 1)
