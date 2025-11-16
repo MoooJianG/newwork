@@ -277,7 +277,13 @@ class GAPDecoder(nn.Module):
             )
             mid = self.FRUList[i_level](_input)
 
-        x_up = F.interpolate(lr, out_size, mode="bicubic", align_corners=False)
-        out = self.upsampler(mid, out_size) + x_up
+        # ★ 根据是否使用高斯查询调用不同接口 ★
+        if self.use_gaussian_query:
+            # GaussianQueryDecoder 需要 (feat, lr, out_size)
+            out = self.upsampler(mid, lr, out_size)
+        else:
+            # SADNUpsampler 需要 (feat, out_size)
+            x_up = F.interpolate(lr, out_size, mode="bicubic", align_corners=False)
+            out = self.upsampler(mid, out_size) + x_up
 
         return out
