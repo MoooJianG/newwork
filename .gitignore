@@ -140,3 +140,38 @@ configs/bak/
 
 .DS_Store
 
+# ============================================================
+# 高斯查询方案相关 (Gaussian Query - 方案二)
+# ============================================================
+
+# 测试结果目录
+results/
+results_*/
+
+# 临时检查点
+*.ckpt.tmp
+checkpoints_temp/
+
+# 高斯可视化输出
+gaussian_params_*.png
+gaussian_kernels_*.npy
+
+# 数据集缓存
+*.cache
+*.pkl.cache
+
+# TensorBoard 临时文件
+events.out.tfevents.*
+
+# 性能分析文件
+*.prof
+*.trace
+
+# ONNX 导出文件
+*.onnx
+*.onnx.json
+
+# 调试输出
+debug_output/
+test_output/
+
