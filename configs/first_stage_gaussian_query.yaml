@@ -1,0 +1,155 @@
+# ============================================================
+# LDCSR 第一阶段配置 - 方案二：高斯查询连续尺度超分
+# ============================================================
+#
+# 此配置启用高斯散射查询机制，实现真正的任意尺度超分辨率
+# 基于 GaussianSR 的 2D 高斯散射 + 坐标查询技术
+#
+# 与 first_stage_kl_v6.yaml 的主要区别:
+#   - decoder_config.params.use_gaussian_query = true
+#   - 添加高斯相关超参数（num_gaussians, kernel_size等）
+#   - 训练时支持更细粒度的非整数尺度（如 2.3x, 3.7x）
+#
+# ============================================================
+
+model:
+  target: models.first_stage_kl_atom.AutoencoderKL
+  base_learning_rate: 4.5e-06
+  monitor: val/rec_loss
+  monitor_mode: min
+  params:
+    embed_dim: 4
+    lossconfig:
+      target: losses.contperceptual.LPIPSWithDiscriminator
+      params:
+        disc_start: 50001
+        kl_weight: 1.0e-06
+        disc_weight: 0.5
+
+    encoder_config:
+      target: modules.e2sr.s1_v6.GAPEncoder
+      params:
+        in_channels: 6
+        ch: 64
+        ch_mult: [1, 2, 2, 4]
+        num_res_blocks: 2
+        attn_resolutions: []
+        z_channels: 4
+        double_z: true
+
+    decoder_config:
+      target: modules.e2sr.s1_v6.GAPDecoder
+      params:
+        ch: 64
+        out_ch: 3
+        ch_mult: [1, 1, 1, 1]
+        num_res_blocks: 2
+        attn_resolutions: []
+        z_channels: 4
+        in_channels: 3
+        num_sr_modules: [12, 12, 12, 12]
+
+        # ============================================================
+        # ★ 方案二专用配置 - 高斯查询参数 ★
+        # ============================================================
+        use_gaussian_query: true            # 启用高斯查询解码器
+        num_gaussians: 100                  # 高斯核候选数量（10x10网格）
+        gaussian_kernel_size: 5             # 高斯核栅格大小（5x5）
+        gaussian_hidden_dim: 256            # MLP 隐藏层维度
+        gaussian_unfold_row: 7              # Unfold 行大小（内存优化）
+        gaussian_unfold_column: 7           # Unfold 列大小
+
+        # 参数说明:
+        #   - num_gaussians: 更多的核 -> 更灵活的表达，但内存消耗更大
+        #     推荐: 100 (默认), 200 (高质量), 50 (低内存)
+        #
+        #   - gaussian_kernel_size: 高斯核的分辨率
+        #     推荐: 5 (快速), 7 (平衡), 9 (高质量)
+        #
+        #   - gaussian_hidden_dim: MLP 容量
+        #     推荐: 256 (默认), 512 (复杂纹理)
+        #
+        #   - unfold_row/column: 分块大小，越小内存占用越低但速度慢
+        #     推荐: 7 (默认), 8 (稍快), 6 (低内存)
+
+data:
+  target: data.datamodule.DataModuleFromConfig
+  params:
+    batch_size: 2                            # ★ 减小以适应高斯查询的内存需求
+    num_workers: 8
+    wrap: false
+
+    train:
+      target: data.downsampled_dataset.MultiScaleDownsampledDataset
+      params:
+        datapath: load/AID_split/train/HR
+        min_scale: 1                         # 最小尺度
+        max_scale: 8                         # 最大尺度
+        is_train: true
+        lr_img_sz: 48                        # LR patch 大小
+        cache: memory
+        data_length: 4000
+        batch_size: 2
+        # ★ 可选: 启用更细粒度的尺度采样
+        # 修改 MultiScaleDownsampledDataset 以支持非整数尺度
+        # sample_fractional_scales: true     # 如 2.3x, 3.7x, 5.2x
+
+    validation:
+      target: data.downsampled_dataset.DownsampledDataset
+      params:
+        datapath: load/AID_split/train/HR
+        scale: 4
+        is_train: false
+        first_k: 2
+        cache: memory
+
+#################################
+##  Configs for the Lightning  ##
+#################################
+lightning:
+  trainer:
+    max_epochs: 1000
+    reload_dataloaders_every_n_epochs: 1
+    # ★ 梯度累积以模拟更大的 batch size
+    accumulate_grad_batches: 2               # 等效 batch_size = 2 * 2 = 4
+
+  callbacks:
+    model_checkpoint:
+      params:
+        save_top_k: 3
+        monitor: val/rec_loss
+        mode: min
+        filename: 'epoch={epoch:04d}-val_loss={val/rec_loss:.4f}'
+
+  logger:
+    tensorboard:
+      name: first_stage_gaussian_query
+      save_dir: logs/
+
+# ============================================================
+# 训练建议
+# ============================================================
+#
+# 1. 快速验证阶段 (前 50 epochs):
+#    - 冻结高斯参数: requires_grad = False
+#    - 仅训练 MLP 和分类器
+#    - 观察 val/rec_loss 是否下降
+#
+# 2. 微调阶段 (50+ epochs):
+#    - 解冻高斯参数
+#    - 使用更小的学习率 (base_learning_rate * 0.1)
+#    - 监控高斯参数的范围（sigma_x, sigma_y 应在 0.2-3.0）
+#
+# 3. GPU 内存优化:
+#    - 减小 batch_size: 2 -> 1
+#    - 减小 lr_img_sz: 48 -> 32
+#    - 减小 unfold_row/column: 7 -> 6
+#    - 启用混合精度训练: trainer.precision = 16
+#
+# 4. 质量提升:
+#    - 增加 num_gaussians: 100 -> 200
+#    - 增加 gaussian_kernel_size: 5 -> 7
+#    - 增加 gaussian_hidden_dim: 256 -> 512
+#    - 训练更长时间: max_epochs = 1500
+#
+# ============================================================
