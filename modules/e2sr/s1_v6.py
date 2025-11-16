@@ -12,6 +12,14 @@ from .common import (
     StyleLayer_norm_scale_shift,
 )
 
+# ★ 方案二: 高斯查询模块导入 ★
+try:
+    from .gaussian_query import GaussianQueryDecoder
+    GAUSSIAN_QUERY_AVAILABLE = True
+except ImportError:
+    GAUSSIAN_QUERY_AVAILABLE = False
+    print("警告: 高斯查询模块未找到，use_gaussian_query 将被忽略")
+
 
 class GAPEncoder(nn.Module):
     # 与LDM一致
@@ -141,6 +149,12 @@ class GAPDecoder(nn.Module):
         in_channels,
         z_channels,
         num_sr_modules=[8, 8, 8, 8],
+        use_gaussian_query=False,           # ★ 新增: 是否使用高斯查询
+        num_gaussians=100,                   # ★ 新增: 高斯核数量
+        gaussian_kernel_size=5,              # ★ 新增: 高斯核尺寸
+        gaussian_hidden_dim=256,             # ★ 新增: MLP 隐藏层维度
+        gaussian_unfold_row=7,               # ★ 新增: Unfold 行大小
+        gaussian_unfold_column=7,            # ★ 新增: Unfold 列大小
         **ignorekwargs,
     ):
         super().__init__()
@@ -150,6 +164,7 @@ class GAPDecoder(nn.Module):
         self.num_resolutions = len(ch_mult)
         self.num_res_blocks = num_res_blocks
         self.in_channels = in_channels
+        self.use_gaussian_query = use_gaussian_query and GAUSSIAN_QUERY_AVAILABLE
 
         assert len(num_sr_modules) == len(ch_mult)
         self.style = StyleLayer_norm_scale_shift()
@@ -162,7 +177,21 @@ class GAPDecoder(nn.Module):
         for num in num_sr_modules:
             self.FRUList.append(FRU(ch, num_modules=num))
 
-        self.upsampler = SADNUpsampler(ch, kSize=3, out_channels=out_ch)
+        # ★ 方案二: 高斯查询解码器 或 传统上采样器 ★
+        if self.use_gaussian_query:
+            self.upsampler = GaussianQueryDecoder(
+                in_channels=ch,
+                out_channels=out_ch,
+                num_gaussians=num_gaussians,
+                kernel_size=gaussian_kernel_size,
+                hidden_dim=gaussian_hidden_dim,
+                unfold_row=gaussian_unfold_row,
+                unfold_column=gaussian_unfold_column
+            )
+            print(f"✓ 使用高斯查询解码器 (num_gaussians={num_gaussians}, kernel_size={gaussian_kernel_size})")
+        else:
+            self.upsampler = SADNUpsampler(ch, kSize=3, out_channels=out_ch)
+            print("✓ 使用传统 SADN 上采样器")
 
         ############# emb branch #############
         # z to block_in
@@ -209,7 +238,12 @@ class GAPDecoder(nn.Module):
             self.up.insert(0, up)  # prepend to get consistent order
 
     def get_last_layer(self):
-        return self.upsampler.fuse[-1].weight
+        # ★ 修改: 兼容高斯查询解码器 ★
+        if self.use_gaussian_query:
+            # 高斯查询解码器的最后一层是 MLP
+            return self.upsampler.gaussian_query.mlp[-1].weight
+        else:
+            return self.upsampler.fuse[-1].weight
 
     def forward(self, emb, lr, out_size):
         lr_size = lr.shape[2:]
