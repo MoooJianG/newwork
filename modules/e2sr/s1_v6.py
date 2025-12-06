@@ -12,13 +12,12 @@ from .common import (
     StyleLayer_norm_scale_shift,
 )
 
-# ★ 方案二: 高斯查询模块导入 ★
 try:
     from .gaussian_query import GaussianQueryDecoder
     GAUSSIAN_QUERY_AVAILABLE = True
 except ImportError:
     GAUSSIAN_QUERY_AVAILABLE = False
-    print("警告: 高斯查询模块未找到，use_gaussian_query 将被忽略")
+    print("高斯查询模块未找到，use_gaussian_query 将被忽略")
 
 
 class GAPEncoder(nn.Module):
@@ -149,12 +148,12 @@ class GAPDecoder(nn.Module):
         in_channels,
         z_channels,
         num_sr_modules=[8, 8, 8, 8],
-        use_gaussian_query=False,           # ★ 新增: 是否使用高斯查询
-        num_gaussians=100,                   # ★ 新增: 高斯核数量
-        gaussian_kernel_size=5,              # ★ 新增: 高斯核尺寸
-        gaussian_hidden_dim=256,             # ★ 新增: MLP 隐藏层维度
-        gaussian_unfold_row=7,               # ★ 新增: Unfold 行大小
-        gaussian_unfold_column=7,            # ★ 新增: Unfold 列大小
+        use_gaussian_query=False,            
+        num_gaussians=100,                  
+        gaussian_kernel_size=5,               
+        gaussian_hidden_dim=256,             
+        gaussian_unfold_row=7,              
+        gaussian_unfold_column=7,           
         **ignorekwargs,
     ):
         super().__init__()
@@ -177,7 +176,7 @@ class GAPDecoder(nn.Module):
         for num in num_sr_modules:
             self.FRUList.append(FRU(ch, num_modules=num))
 
-        # ★ 方案二: 高斯查询解码器 或 传统上采样器 ★
+        #  方案二: 高斯查询解码器 或 传统上采样器 
         if self.use_gaussian_query:
             self.upsampler = GaussianQueryDecoder(
                 in_channels=ch,
@@ -188,10 +187,10 @@ class GAPDecoder(nn.Module):
                 unfold_row=gaussian_unfold_row,
                 unfold_column=gaussian_unfold_column
             )
-            print(f"✓ 使用高斯查询解码器 (num_gaussians={num_gaussians}, kernel_size={gaussian_kernel_size})")
+            print(f"使用高斯查询解码器 (num_gaussians={num_gaussians}, kernel_size={gaussian_kernel_size})")
         else:
             self.upsampler = SADNUpsampler(ch, kSize=3, out_channels=out_ch)
-            print("✓ 使用传统 SADN 上采样器")
+            print("使用传统 SADN 上采样器")
 
         ############# emb branch #############
         # z to block_in
@@ -238,7 +237,6 @@ class GAPDecoder(nn.Module):
             self.up.insert(0, up)  # prepend to get consistent order
 
     def get_last_layer(self):
-        # ★ 修改: 兼容高斯查询解码器 ★
         if self.use_gaussian_query:
             # 高斯查询解码器的最后一层是 MLP
             return self.upsampler.gaussian_query.mlp[-1].weight
@@ -277,7 +275,6 @@ class GAPDecoder(nn.Module):
             )
             mid = self.FRUList[i_level](_input)
 
-        # ★ 根据是否使用高斯查询调用不同接口 ★
         if self.use_gaussian_query:
             # GaussianQueryDecoder 需要 (feat, lr, out_size)
             out = self.upsampler(mid, lr, out_size)

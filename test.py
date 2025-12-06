@@ -94,7 +94,7 @@ def make_dataloader(type, datsetName, scale):
         )
     else:
         raise "Unknown dataset type"
-    loader = torch.utils.data.DataLoader(dataset, batch_size=2, shuffle=False)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
     return loader
 
 

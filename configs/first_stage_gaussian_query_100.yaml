@@ -1,5 +1,3 @@
-
-
 model:
   target: models.first_stage_kl_atom.AutoencoderKL
   base_learning_rate: 4.5e-06
@@ -37,30 +35,33 @@ model:
         in_channels: 3
         num_sr_modules: [12, 12, 12, 12]
 
-        use_gaussian_query: true      
-        num_gaussians: 49            
-        gaussian_kernel_size: 5             
-        gaussian_hidden_dim: 256        
-        gaussian_unfold_row: 6        
-
+        use_gaussian_query: true          
+        num_gaussians: 100                  
+        gaussian_kernel_size: 5            
+        gaussian_hidden_dim: 256            
+        gaussian_unfold_row: 6              
+        gaussian_unfold_column: 6           
 
 data:
   target: data.datamodule.DataModuleFromConfig
   params:
-    num_workers: 8
+    batch_size: 2                           
+    num_workers: 16
     wrap: false
+
 
     train:
       target: data.downsampled_dataset.MultiScaleDownsampledDataset
       params:
         datapath: load/AID_split/train/HR
-        min_scale: 1                        
-        max_scale: 8                   
+        min_scale: 1                         
+        max_scale: 8                      
         is_train: true
-        lr_img_sz: 48                   
+        lr_img_sz: 48                     
         cache: memory
         data_length: 4000
         batch_size: 2
+
 
     validation:
       target: data.downsampled_dataset.DownsampledDataset
@@ -78,7 +79,8 @@ lightning:
   trainer:
     max_epochs: 1000
     reload_dataloaders_every_n_epochs: 1
-    accumulate_grad_batches: 2            
+    accumulate_grad_batches: 2              
+
 
   callbacks:
     model_checkpoint:
@@ -92,4 +94,5 @@ lightning:
     tensorboard:
       name: first_stage_gaussian_query
       save_dir: logs/
+
 

@@ -1,10 +1,3 @@
-"""
-高斯散射查询模块 - 方案二核心实现
-实现真正的连续尺度超分辨率
-
-完整移植 GaussianSR 的 2D 高斯散射机制，并适配 LDCSR 架构
-"""
-
 import math
 import numpy as np
 import torch
@@ -59,18 +52,26 @@ class GaussianQueryModule(nn.Module):
             nn.Conv2d(in_channels, num_gaussians, 1)
         )
 
-        # 可学习的高斯参数（与 GaussianSR 一致）
+        # 根据 num_gaussians 计算网格大小
+        grid_size = int(num_gaussians ** 0.5)
+        if grid_size * grid_size != num_gaussians:
+            grid_size = int((num_gaussians ** 0.5) + 0.5)
+            actual_num_gaussians = grid_size * grid_size
+            if actual_num_gaussians != num_gaussians:
+                print(f"num_gaussians={num_gaussians} 不是完全平方数,调整为 {actual_num_gaussians} ({grid_size}x{grid_size})")
+                self.num_gaussians = actual_num_gaussians
+
         sigma_x, sigma_y = torch.meshgrid(
-            torch.linspace(0.2, 3.0, 10),
-            torch.linspace(0.2, 3.0, 10),
+            torch.linspace(0.2, 3.0, grid_size),
+            torch.linspace(0.2, 3.0, grid_size),
             indexing='ij'
         )
-        self.sigma_x = nn.Parameter(sigma_x.reshape(-1))  # [100]
+        self.sigma_x = nn.Parameter(sigma_x.reshape(-1))  # [num_gaussians]
         self.sigma_y = nn.Parameter(sigma_y.reshape(-1))
-        self.opacity = nn.Parameter(torch.sigmoid(torch.ones(num_gaussians, 1)))
-        self.rho = nn.Parameter(torch.clamp(torch.zeros(num_gaussians, 1), -1, 1))
+        self.opacity = nn.Parameter(torch.sigmoid(torch.ones(self.num_gaussians, 1)))
+        self.rho = nn.Parameter(torch.clamp(torch.zeros(self.num_gaussians, 1), -1, 1))
 
-        # 特征增强模块（用于坐标查询）
+        # 特征增强模块
         self.coef = nn.Conv2d(in_channels, hidden_dim, 3, padding=1)
         self.freq = nn.Conv2d(in_channels, hidden_dim, 3, padding=1)
         self.phase = nn.Linear(2, hidden_dim // 2, bias=False)
@@ -84,16 +85,23 @@ class GaussianQueryModule(nn.Module):
             nn.Linear(hidden_dim, out_channels)
         )
 
+        self.unfold = nn.Unfold(
+            kernel_size=(self.unfold_row, self.unfold_column),
+            stride=(self.unfold_row, self.unfold_column)
+        )
+        # Fold 对象需要在 forward 时根据动态尺寸创建，缓存参数
+        self._fold_cache = {}  # 缓存不同尺寸的 Fold 对象
+
     def weighted_gaussian_parameters(self, logits):
         """
-        计算加权高斯参数（来自 GaussianSR）
+        计算加权高斯参数
 
         Args:
             logits: [B, num_gaussians, H, W] - 分类器输出
 
         Returns:
             (weighted_sigma_x, weighted_sigma_y, weighted_opacity, weighted_rho)
-            每个都是 [H*W] 的张量
+            每个都是 [H*W] 的张量（对batch维度取平均）
         """
         B, C, H, W = logits.size()
 
@@ -107,8 +115,8 @@ class GaussianQueryModule(nn.Module):
         weighted_opacity = (logits * self.opacity[:, 0].unsqueeze(0).unsqueeze(0).unsqueeze(0)).sum(dim=-1)
         weighted_rho = (logits * self.rho[:, 0].unsqueeze(0).unsqueeze(0).unsqueeze(0)).sum(dim=-1)
 
-        # 平均到批次维度
-        weighted_sigma_x = weighted_sigma_x.reshape(B, -1).mean(dim=0)
+
+        weighted_sigma_x = weighted_sigma_x.reshape(B, -1).mean(dim=0)  # [H*W]
         weighted_sigma_y = weighted_sigma_y.reshape(B, -1).mean(dim=0)
         weighted_opacity = weighted_opacity.reshape(B, -1).mean(dim=0)
         weighted_rho = weighted_rho.reshape(B, -1).mean(dim=0)
@@ -117,7 +125,7 @@ class GaussianQueryModule(nn.Module):
 
     def generate_gaussian_splatting(self, feat, logits, target_size, scale):
         """
-        生成高斯散射特征场（完整实现，来自 GaussianSR）
+        生成高斯散射特征场
 
         Args:
             feat: [B, C, H, W] - 输入特征
@@ -139,14 +147,11 @@ class GaussianQueryModule(nn.Module):
         upsampled_feat = F.interpolate(feat, size=upsampled_size, mode='bicubic', align_corners=False)
         upsampled_logits = F.interpolate(logits, size=upsampled_size, mode='bicubic', align_corners=False)
 
-        # 2. Unfold 分块处理（节省内存）
-        unfold = nn.Unfold(kernel_size=(self.unfold_row, self.unfold_column),
-                          stride=(self.unfold_row, self.unfold_column))
+        # 2. Unfold 分块处理
+        unfolded_feat = self.unfold(upsampled_feat)  # [B, C*row*col, L]
+        unfolded_logits = self.unfold(upsampled_logits)  # [B, num_g*row*col, L]
 
-        unfolded_feat = unfold(upsampled_feat)  # [B, C*row*col, L]
-        unfolded_logits = unfold(upsampled_logits)  # [B, num_g*row*col, L]
-
-        L = unfolded_feat.shape[-1]  # 块的数量
+        L = unfolded_feat.shape[-1]  
 
         # 重塑为 [B*L, C, row, col]
         unfolded_feat = unfolded_feat.transpose(1, 2).reshape(B * L, C, self.unfold_row, self.unfold_column)
@@ -163,59 +168,45 @@ class GaussianQueryModule(nn.Module):
         weighted_sigma_x, weighted_sigma_y, weighted_opacity, weighted_rho = \
             self.weighted_gaussian_parameters(unfolded_logits)
 
-        sigma_x = weighted_sigma_x.view(num_LR_points, 1, 1)
+        # weighted_* 的形状是 [num_LR_points]
+        # 所有batch共享相同的高斯参数
+        batch_size = B * L
+        sigma_x = weighted_sigma_x.view(num_LR_points, 1, 1)  # [num_LR_points, 1, 1]
         sigma_y = weighted_sigma_y.view(num_LR_points, 1, 1)
         rho = weighted_rho.view(num_LR_points, 1, 1)
 
         # 5. 生成高斯核
-        # 5.1 协方差矩阵
+        total_points = num_LR_points  
+
+        # 5.1 协方差矩阵 - 
         covariance = torch.stack([
             torch.stack([sigma_x ** 2 + 1e-5, rho * sigma_x * sigma_y], dim=-1),
             torch.stack([rho * sigma_x * sigma_y, sigma_y ** 2 + 1e-5], dim=-1)
-        ], dim=-2)  # [num_LR_points, 2, 2]
+        ], dim=-2)  # [total_points, 2, 2]
 
-        inv_covariance = torch.inverse(covariance).to(device)
+        inv_covariance = torch.inverse(covariance)
 
         # 5.2 生成栅格 [-5, 5]
-        start = torch.tensor([-5.0], device=device).view(-1, 1)
-        end = torch.tensor([5.0], device=device).view(-1, 1)
-        base_linspace = torch.linspace(0, 1, steps=self.kernel_size, device=device)
-        ax_batch = start + (end - start) * base_linspace
+        ax = torch.linspace(-5.0, 5.0, steps=self.kernel_size, device=device)
+        yy, xx = torch.meshgrid(ax, ax, indexing='ij')
+        xy = torch.stack([xx, yy], dim=-1)  # [k, k, 2]
 
-        ax_batch_expanded_x = ax_batch.unsqueeze(-1).expand(-1, -1, self.kernel_size)
-        ax_batch_expanded_y = ax_batch.unsqueeze(1).expand(-1, self.kernel_size, -1)
-
-        xx, yy = ax_batch_expanded_x, ax_batch_expanded_y
-        xy = torch.stack([xx, yy], dim=-1)  # [num_LR_points, k, k, 2]
-
-        # 5.3 计算高斯值（马氏距离）
-        # xy: [num_LR_points, k, k, 2]
-        # inv_covariance: [num_LR_points, 2, 2]
-        # 需要计算: z = -0.5 * xy @ inv_covariance @ xy^T
-
-        # 重塑 xy 为 [num_LR_points, k*k, 2]
-        xy_flat = xy.reshape(num_LR_points, -1, 2)
-
-        # 计算 xy @ inv_covariance: [num_LR_points, k*k, 2]
-        temp = torch.matmul(xy_flat, -0.5 * inv_covariance)
-
-        # 计算内积: [num_LR_points, k*k]
-        z_flat = (temp * xy_flat).sum(dim=-1)
-
-        # 重塑回 [num_LR_points, k, k]
-        z = z_flat.reshape(num_LR_points, self.kernel_size, self.kernel_size)
+        # 5.3 计算高斯值（马氏距离）- 使用einsum
+        # xy: [k, k, 2], inv_covariance: [num_LR_points, 2, 2]
+        # 使用Einstein求和约定计算: z = -0.5 * xy @ inv_covariance @ xy^T
+        z = torch.einsum('...i,...ij,...j->...', xy, -0.5 * inv_covariance, xy)  # [num_LR_points, k, k]
 
         kernel = torch.exp(z) / (
-            2 * torch.tensor(np.pi, device=device) *
-            torch.sqrt(torch.det(covariance)).to(device).view(num_LR_points, 1, 1)
+            2 * np.pi *
+            torch.sqrt(torch.det(covariance)).view(total_points, 1, 1)
         )
 
         # 归一化
         kernel_max_1, _ = kernel.max(dim=-1, keepdim=True)
         kernel_max_2, _ = kernel_max_1.max(dim=-2, keepdim=True)
-        kernel_normalized = kernel / kernel_max_2
+        kernel_normalized = kernel / kernel_max_2  # [num_LR_points, k, k]
 
-        # 扩展到通道维度
+        # 扩展到通道维度 [num_LR_points, C, k, k]
         kernel_reshaped = kernel_normalized.repeat(1, C, 1).contiguous().view(
             num_LR_points * C, self.kernel_size, self.kernel_size
         )
@@ -234,7 +225,7 @@ class GaussianQueryModule(nn.Module):
             raise ValueError(f"Kernel size {self.kernel_size} 过大，无法填充到 ({kernel_h}, {kernel_w})")
 
         padding = (pad_w // 2, pad_w // 2 + pad_w % 2, pad_h // 2, pad_h // 2 + pad_h % 2)
-        kernel_color_padded = F.pad(kernel_color, padding, "constant", 0)  # [N, C, kh, kw]
+        kernel_color_padded = F.pad(kernel_color, padding, "constant", 0) 
 
         # 7. Affine Transform 平移到像素中心
         batch_size = B * L
@@ -254,18 +245,23 @@ class GaussianQueryModule(nn.Module):
         kernel_color_padded_translated = kernel_color_padded_translated.view(batch_size, b, c, h, w)
 
         # 8. Splatting 累加
-        colors_weighted = colors * weighted_opacity.to(device).unsqueeze(-1).expand(batch_size, -1, -1)
+        # weighted_opacity 形状是 [num_LR_points]，需要扩展到 [batch_size, num_LR_points]
+        colors_weighted = colors * weighted_opacity.unsqueeze(-1).expand(batch_size, -1, -1)  # [batch_size, num_LR_points, C]
         color_values_reshaped = colors_weighted.unsqueeze(-1).unsqueeze(-1)  # [B*L, N, C, 1, 1]
         final_image_layers = color_values_reshaped * kernel_color_padded_translated  # [B*L, N, C, h, w]
         final_image = final_image_layers.sum(dim=1)  # [B*L, C, h, w]
         final_image = torch.clamp(final_image, 0, 1)
 
-        # 9. Fold 回原始尺寸
-        fold = nn.Fold(
-            output_size=(kernel_h * num_kernels_row, kernel_w * num_kernels_column),
-            kernel_size=(kernel_h, kernel_w),
-            stride=(kernel_h, kernel_w)
-        )
+        output_size = (kernel_h * num_kernels_row, kernel_w * num_kernels_column)
+        fold_key = (output_size, kernel_h, kernel_w)
+
+        if fold_key not in self._fold_cache:
+            self._fold_cache[fold_key] = nn.Fold(
+                output_size=output_size,
+                kernel_size=(kernel_h, kernel_w),
+                stride=(kernel_h, kernel_w)
+            ).to(device)
+        fold = self._fold_cache[fold_key]
 
         final_image = final_image.reshape(B, L, C * kernel_h * kernel_w).transpose(1, 2)
         final_image = fold(final_image)  # [B, C, H_full, W_full]
@@ -506,4 +502,3 @@ if __name__ == '__main__':
         out = decoder(feat, lr, (target_h, target_w))
         print(f"  尺度 {s}x: 输出 {out.shape}")
 
-    print("\n✅ 所有测试通过！")
