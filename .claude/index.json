@@ -1,0 +1,300 @@
+{
+  "timestamp": "2025-12-09T13:48:02",
+  "project_name": "LDCSR",
+  "project_summary": "Latent Diffusion for Continuous-Scale Super-Resolution - 基于潜在扩散模型的遥感图像连续尺度超分辨率系统",
+  "scan_coverage": {
+    "total_files_estimated": 120,
+    "scanned_files": 95,
+    "coverage_percentage": 79,
+    "truncated": false
+  },
+  "modules": [
+    {
+      "name": "models",
+      "path": "/root/autodl-tmp/newwork/models",
+      "type": "core_logic",
+      "language": "Python",
+      "description": "核心模型定义，包括第一阶段VAE和第二阶段扩散模型",
+      "entry_files": [
+        "models/first_stage_kl_atom.py",
+        "models/second_stage_van_v4.py"
+      ],
+      "key_interfaces": [
+        "AutoencoderKL.encode()",
+        "AutoencoderKL.decode()",
+        "S2Model.test_step()",
+        "DDPM.training_step()"
+      ],
+      "dependencies": [
+        "pytorch_lightning",
+        "torch",
+        "modules.distributions",
+        "modules.diffusionmodules"
+      ],
+      "test_files": [],
+      "coverage": {
+        "scanned": true,
+        "has_entry": true,
+        "has_interfaces": true,
+        "has_tests": false,
+        "missing": ["单元测试"]
+      }
+    },
+    {
+      "name": "modules",
+      "path": "/root/autodl-tmp/newwork/modules",
+      "type": "core_components",
+      "language": "Python",
+      "description": "核��组件库：E2SR编解码器、UNet、注意力机制、图像降质等",
+      "entry_files": [
+        "modules/e2sr/s1_v6.py",
+        "modules/diffusionmodules/openaimodel.py",
+        "modules/e2sr/gaussian_query.py"
+      ],
+      "key_interfaces": [
+        "GAPEncoder.forward()",
+        "GAPDecoder.forward()",
+        "UNetModel.forward()",
+        "GaussianQueryDecoder"
+      ],
+      "subdirectories": [
+        "e2sr/",
+        "diffusionmodules/",
+        "distributions/",
+        "image_degradation/"
+      ],
+      "coverage": {
+        "scanned": true,
+        "has_entry": true,
+        "has_interfaces": true,
+        "has_tests": false,
+        "missing": ["文档注释"]
+      }
+    },
+    {
+      "name": "data",
+      "path": "/root/autodl-tmp/newwork/data",
+      "type": "data_handling",
+      "language": "Python",
+      "description": "数据集加载、预处理、增强和DataModule",
+      "entry_files": [
+        "data/base.py",
+        "data/downsampled_dataset.py",
+        "data/datamodule.py"
+      ],
+      "key_interfaces": [
+        "BaseDataset.__getitem__()",
+        "DownsampledDataset",
+        "MultiScaleDownsampledDataset",
+        "DataModuleFromConfig"
+      ],
+      "dependencies": [
+        "torchvision.transforms",
+        "pytorch_lightning"
+      ],
+      "coverage": {
+        "scanned": true,
+        "has_entry": true,
+        "has_interfaces": true,
+        "has_tests": false,
+        "missing": []
+      }
+    },
+    {
+      "name": "losses",
+      "path": "/root/autodl-tmp/newwork/losses",
+      "type": "loss_functions",
+      "language": "Python",
+      "description": "损失函数：LPIPS、GAN、L1/L2、感知损失等",
+      "entry_files": [
+        "losses/contperceptual.py",
+        "losses/basic_loss.py",
+        "losses/gan_loss.py"
+      ],
+      "key_interfaces": [
+        "LPIPSWithDiscriminator.forward()",
+        "hinge_d_loss",
+        "vanilla_d_loss"
+      ],
+      "coverage": {
+        "scanned": true,
+        "has_entry": true,
+        "has_interfaces": true,
+        "has_tests": false,
+        "missing": []
+      }
+    },
+    {
+      "name": "metrics",
+      "path": "/root/autodl-tmp/newwork/metrics",
+      "type": "evaluation",
+      "language": "Python",
+      "description": "评估指标：PSNR、SSIM、FID、LPIPS",
+      "entry_files": [
+        "metrics/psnr_ssim.py",
+        "metrics/fid.py",
+        "metrics/batched_iqa.py"
+      ],
+      "key_interfaces": [
+        "calc_psnr_ssim()",
+        "calc_fid()",
+        "batched_iqa()"
+      ],
+      "coverage": {
+        "scanned": true,
+        "has_entry": true,
+        "has_interfaces": true,
+        "has_tests": false,
+        "missing": []
+      }
+    },
+    {
+      "name": "configs",
+      "path": "/root/autodl-tmp/newwork/configs",
+      "type": "configuration",
+      "language": "YAML",
+      "description": "训练和模型配置文件",
+      "entry_files": [
+        "configs/first_stage_kl_v6.yaml",
+        "configs/second_stage_van_v4.yaml"
+      ],
+      "key_configs": [
+        "first_stage_kl_v6 - 第一阶段VAE训练配置",
+        "second_stage_van_v4 - 第二阶段扩散模型训练配置",
+        "first_stage_gaussian_query - 高斯查询实验配置"
+      ],
+      "coverage": {
+        "scanned": true,
+        "has_entry": true,
+        "has_interfaces": false,
+        "has_tests": false,
+        "missing": []
+      }
+    },
+    {
+      "name": "utils",
+      "path": "/root/autodl-tmp/newwork/utils",
+      "type": "utilities",
+      "language": "Python",
+      "description": "工具函数：回调、学习率调度、IO、Karras扩散等",
+      "entry_files": [
+        "utils/callbacks.py",
+        "utils/lr_scheduler.py",
+        "utils/__init__.py"
+      ],
+      "subdirectories": [
+        "karras/"
+      ],
+      "coverage": {
+        "scanned": true,
+        "has_entry": true,
+        "has_interfaces": true,
+        "has_tests": false,
+        "missing": []
+      }
+    },
+    {
+      "name": "scripts",
+      "path": "/root/autodl-tmp/newwork/scripts",
+      "type": "shell_scripts",
+      "language": "Shell",
+      "description": "训练和测试脚本",
+      "entry_files": [
+        "scripts/train_gaussian_query.sh",
+        "scripts/test_gaussian_query.sh"
+      ],
+      "coverage": {
+        "scanned": false,
+        "has_entry": true,
+        "has_interfaces": false,
+        "has_tests": false,
+        "missing": []
+      }
+    }
+  ],
+  "important_files": {
+    "entry_points": [
+      "/root/autodl-tmp/newwork/train.py",
+      "/root/autodl-tmp/newwork/test.py",
+      "/root/autodl-tmp/newwork/auto_benchmark.py"
+    ],
+    "config_files": [
+      "/root/autodl-tmp/newwork/configs/first_stage_kl_v6.yaml",
+      "/root/autodl-tmp/newwork/configs/second_stage_van_v4.yaml"
+    ],
+    "data_preparation": [
+      "/root/autodl-tmp/newwork/data/prepare_split.py",
+      "/root/autodl-tmp/newwork/gen_lr_datastes.py"
+    ],
+    "requirements": [
+      "/root/autodl-tmp/newwork/requirement.txt"
+    ],
+    "documentation": [
+      "/root/autodl-tmp/newwork/readme.md",
+      "/root/autodl-tmp/newwork/CLAUDE.md"
+    ]
+  },
+  "ignore_rules": {
+    "source": ".gitignore",
+    "patterns": [
+      "__pycache__/**",
+      "*.py[cod]",
+      "*.so",
+      "build/**",
+      "dist/**",
+      "*.egg-info/**",
+      "*.log",
+      "logs/**",
+      "logs_*/**",
+      "experiments/**",
+      "*.out",
+      ".vscode/**",
+      "visual/**",
+      "results/**",
+      "results_*/**",
+      "*.ckpt.tmp",
+      "checkpoints_temp/**",
+      "*.cache",
+      "*.prof",
+      "*.trace",
+      "*.onnx",
+      "debug_output/**",
+      "test_output/**",
+      ".ipynb_checkpoints/**",
+      ".spec-workflow/**"
+    ],
+    "ignored_directories": [
+      "logs",
+      "experiments",
+      "visual",
+      "results",
+      ".vscode",
+      ".ipynb_checkpoints"
+    ]
+  },
+  "gaps_and_recommendations": {
+    "missing_components": [
+      "单元测试覆盖",
+      "API文档",
+      "模块级CLAUDE.md"
+    ],
+    "recommended_next_steps": [
+      "为核心模块创建子目录CLAUDE.md (models/, modules/, data/)",
+      "补充modules/e2sr/目录详细文档（高斯查询、GAP编解码器）",
+      "记录实验版本差异（s1_v6 vs s1_v8, second_stage_van_v4 vs other versions）",
+      "补充测试数据集下载链接和准备指南"
+    ],
+    "priority_directories_for_deep_scan": [
+      "modules/e2sr/",
+      "models/diffusion/",
+      "modules/diffusionmodules/"
+    ]
+  },
+  "statistics": {
+    "total_python_files": 95,
+    "total_config_files": 42,
+    "total_shell_scripts": 4,
+    "total_markdown_files": 8,
+    "lines_of_code_estimated": "~15000 (未精确统计)"
+  }
+}
