@@ -176,6 +176,9 @@ CLAUDE.md
 .claude/
 .spec-workflow/
 
+# 测试文件
+test_*.py
+
 # 调试输出
 debug_output/
 test_output/
