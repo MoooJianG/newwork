@@ -170,10 +170,12 @@ events.out.tfevents.*
 # ONNX 导出文件
 *.onnx
 *.onnx.json
+
+# Claude Code 生成的文件
 CLAUDE.md
+.claude/
+.spec-workflow/
 
 # 调试输出
 debug_output/
 test_output/
-
-.spec-workflow/
